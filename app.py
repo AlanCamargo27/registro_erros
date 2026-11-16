@@ -1,6 +1,5 @@
 from datetime import datetime
 import json
-import sqlite3
 import pandas as pd
 import streamlit as st
 import banco
@@ -741,8 +740,8 @@ def tela_admin_usuarios():
               )
               st.success(f"Usuário '{novo_user}' ({novo_role}) criado!")
               st.rerun()
-            except sqlite3.IntegrityError:
-              st.error("Este login já existe!")
+            except Exception:
+              st.error("Este login já existe ou ocorreu um erro.")
           else:
             st.error("Preencha todos os campos.")
 
@@ -816,7 +815,7 @@ def tela_admin_usuarios():
             )
             st.success(f"Separador '{nome_sep.strip()}' adicionado!")
             st.rerun()
-          except sqlite3.IntegrityError:
+          except Exception:
             st.error("Separador já cadastrado.")
 
     seps = banco.get_separadores()
