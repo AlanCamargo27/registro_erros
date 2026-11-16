@@ -223,14 +223,12 @@ def inserir_registro(
   st.cache_data.clear()
 
 
-@st.cache_data(ttl=30)
+
 def carregar_todos_registros():
   engine = get_engine()
   df = pd.read_sql("SELECT * FROM registros ORDER BY id DESC", engine)
   return df
 
-
-@st.cache_data(ttl=30)
 def carregar_registros_por_conferente(username):
   engine = get_engine()
   df = pd.read_sql(
