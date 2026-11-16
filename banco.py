@@ -25,7 +25,7 @@ def hash_senha(senha):
 def init_db():
   engine = get_engine()
   with engine.begin() as conn:
-    # Tabela de Usuários
+    # 1. Criação da tabela de usuários
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS usuarios (
             username TEXT PRIMARY KEY,
@@ -34,6 +34,19 @@ def init_db():
             role TEXT NOT NULL
         )
     """))
+
+    # 2. Inserção segura do admin padrão (evita UniqueViolation se já existir)
+    senha_padrao_hash = hash_senha("123456")  # ou a senha que preferir
+    conn.execute(
+        text("""
+        INSERT INTO usuarios (username, nome, senha_hash, role)
+        VALUES ('admin', 'Administrador', :senha_hash, 'admin')
+        ON CONFLICT (username) DO NOTHING;
+    """),
+        {"senha_hash": senha_padrao_hash},
+    )
+
+    # (Mantenha aqui as criações das outras tabelas do seu banco.py, como registros, separadores, etc.)
 
     # Tabela de Separadores
     conn.execute(text("""
