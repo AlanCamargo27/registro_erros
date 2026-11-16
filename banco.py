@@ -9,6 +9,10 @@ from sqlalchemy import create_engine, text
 DATABASE_URL = st.secrets.get("DATABASE_URL")
 
 def get_engine():
+  DATABASE_URL = st.secrets.get("DATABASE_URL")
+  if not DATABASE_URL:
+    st.error("⚠️ A variável DATABASE_URL não foi encontrada nas Secrets do Streamlit Cloud! Configure-a em Settings > Secrets.")
+    st.stop()
   return create_engine(DATABASE_URL)
 
 def hash_senha(senha):
