@@ -4,6 +4,7 @@ import json
 import pandas as pd
 import streamlit as st
 from sqlalchemy import create_engine, text
+
 @st.cache_data(ttl=60) # Guarda em cache durante 60 segundos
 def carregar_todos_registros():
     engine = get_engine()
