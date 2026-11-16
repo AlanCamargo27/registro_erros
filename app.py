@@ -701,4 +701,182 @@ def tela_admin_registros():
   st.divider()
   csv = df.drop(columns=["dados_pendentes"], errors="ignore").to_csv(index=False, sep=";").encode("utf-8-sig")
   st.download_button(
-      "📥
+      "📥 Baixar Base Completa (CSV)",
+      data=csv,
+      file_name=f"relatorio_geral_{datetime.now().strftime('%Y%m%d')}.csv",
+      mime="text/csv",
+  )
+
+
+def tela_admin_usuarios():
+  st.title("👥 Gestão de Usuários e Separadores")
+  tab1, tab2 = st.tabs(["🔐 Usuários (Conferentes e Gestores)", "👷 Separadores"])
+
+  with tab1:
+    col1, col2 = st.columns([1, 1.5])
+    with col1:
+      st.subheader("Novo Usuário")
+      with st.form("form_novo_user", clear_on_submit=True):
+        novo_nome = st.text_input("Nome Completo (Ex: Ana Souza)")
+        novo_user = st.text_input("Login de Acesso (Ex: ana.souza)").strip().lower()
+        novo_role = st.selectbox("Perfil de Acesso", ["conferente", "gestor"])
+        st.caption("A senha inicial será definida automaticamente como: **123456**")
+        
+        if st.form_submit_button("Criar Usuário", use_container_width=True):
+          if novo_nome and novo_user:
+            try:
+              banco.criar_usuario(novo_user, novo_nome, novo_role)
+              banco.registrar_auditoria(
+                  st.session_state.username, st.session_state.nome,
+                  "CRIAR_USUARIO", f"Criou usuário '{novo_user}' com perfil '{novo_role}'."
+              )
+              st.success(f"Usuário '{novo_user}' ({novo_role}) criado!")
+              st.rerun()
+            except Exception:
+              st.error("Este login já existe ou ocorreu um erro.")
+          else:
+            st.error("Preencha todos os campos.")
+
+    with col2:
+      st.subheader("Usuários Cadastrados")
+      df_users = banco.listar_usuarios()
+
+      if df_users.empty:
+        st.info("Nenhum usuário cadastrado.")
+      else:
+        st.dataframe(df_users, use_container_width=True, hide_index=True)
+
+        if st.session_state.role == "admin":
+          user_acao = st.selectbox("Selecione o usuário para gerenciar:", df_users["username"], key="select_user_acao")
+          nome_atual_user = df_users[df_users["username"] == user_acao]["nome"].values[0]
+
+          with st.expander("✏️ Editar Nome e Login do Usuário"):
+            with st.form(f"form_edit_user_{user_acao}"):
+              edit_nome = st.text_input("Novo Nome Completo", value=nome_atual_user)
+              edit_login = st.text_input("Novo Login de Acesso", value=user_acao).strip().lower()
+
+              if st.form_submit_button("💾 Salvar Alterações", use_container_width=True):
+                if not edit_nome.strip() or not edit_login.strip():
+                  st.error("Nome e login não podem ficar vazios.")
+                else:
+                  sucesso, msg = banco.atualizar_dados_usuario(user_acao, edit_login, edit_nome.strip())
+                  if sucesso:
+                    banco.registrar_auditoria(
+                        st.session_state.username, st.session_state.nome,
+                        "EDITAR_USUARIO", f"Alterou dados do usuário '{user_acao}' para '{edit_login}'."
+                    )
+                    st.success(msg)
+                    st.rerun()
+                  else:
+                    st.error(msg)
+
+          st.write("")
+          c_b1, c_b2 = st.columns(2)
+
+          if c_b1.button("🔄 Resetar Senha (123456)", key=f"reset_{user_acao}", use_container_width=True):
+            banco.resetar_senha_usuario(user_acao)
+            banco.registrar_auditoria(
+                st.session_state.username, st.session_state.nome,
+                "RESETAR_SENHA", f"Resetou a senha do usuário '{user_acao}'."
+            )
+            st.success(f"Senha de '{user_acao}' resetada para 123456.")
+
+          if c_b2.button("🗑️ Excluir Usuário", key=f"del_user_{user_acao}", use_container_width=True):
+            banco.excluir_usuario(user_acao)
+            banco.registrar_auditoria(
+                st.session_state.username, st.session_state.nome,
+                "EXCLUIR_USUARIO", f"Excluiu o usuário '{user_acao}'."
+            )
+            st.warning(f"Usuário '{user_acao}' excluído.")
+            st.rerun()
+        else:
+          st.info("ℹ️ Gestores podem cadastrar novos conferentes e separadores, mas a edição de logins, redefinição de senhas e exclusão de contas são restritas ao Administrador.")
+
+  with tab2:
+    st.subheader("Cadastro de Separadores")
+    with st.form("form_sep", clear_on_submit=True):
+      nome_sep = st.text_input("Nome do Separador")
+      if st.form_submit_button("Adicionar Separador"):
+        if nome_sep.strip():
+          try:
+            banco.adicionar_separador(nome_sep.strip())
+            banco.registrar_auditoria(
+                st.session_state.username, st.session_state.nome,
+                "CRIAR_SEPARADOR", f"Adicionou o separador '{nome_sep.strip()}'."
+            )
+            st.success(f"Separador '{nome_sep.strip()}' adicionado!")
+            st.rerun()
+          except Exception:
+            st.error("Separador já cadastrado.")
+
+    seps = banco.get_separadores()
+    if seps:
+      sep_del = st.selectbox("Remover Separador", seps, key="select_del_sep")
+      if st.button("Remover", key="btn_del_sep"):
+        banco.remover_separador(sep_del)
+        banco.registrar_auditoria(
+            st.session_state.username, st.session_state.nome,
+            "REMOVER_SEPARADOR", f"Removeu o separador '{sep_del}'."
+        )
+        st.success(f"Separador '{sep_del}' removido.")
+        st.rerun()
+
+
+def tela_historico():
+  st.title("📜 Histórico de Ações do Sistema (Auditoria)")
+  st.caption("Registro detalhado de todas as ações executadas por conferentes, gestores e administradores.")
+
+  df_audit = banco.carregar_auditoria()
+  if df_audit.empty:
+    st.info("Nenhum evento registrado na auditoria ainda.")
+    return
+
+  st.dataframe(
+      df_audit.rename(
+          columns={
+              "id": "ID",
+              "data_hora": "Data/Hora",
+              "usuario": "Usuário",
+              "nome": "Nome",
+              "acao": "Ação",
+              "detalhes": "Detalhes",
+          }
+      ),
+      use_container_width=True,
+      hide_index=True,
+  )
+
+  csv = df_audit.to_csv(index=False, sep=";").encode("utf-8-sig")
+  st.download_button(
+      "📥 Baixar Relatório de Auditoria (CSV)",
+      data=csv,
+      file_name=f"auditoria_{datetime.now().strftime('%Y%m%d')}.csv",
+      mime="text/csv",
+  )
+
+
+# ==============================================================================
+# ROTEAMENTO PRINCIPAL
+# ==============================================================================
+container_principal = st.container()
+
+with container_principal:
+  if not st.session_state.logged_in:
+    tela_publica()
+  else:
+    if menu == "📊 Painel Público":
+      tela_publica()
+    elif menu == "📝 Registrar Ocorrência":
+      tela_registrar_ocorrencia()
+    elif menu == "📋 Meus Registros":
+      tela_meus_registros()
+    elif menu == "⚙️ Meu Perfil e Senha":
+      tela_meu_perfil()
+    elif menu == "⏳ Aprovações Pendentes":
+      tela_aprovacoes()
+    elif menu == "🗂️ Todos os Registros":
+      tela_admin_registros()
+    elif menu == "👥 Usuários e Cadastros":
+      tela_admin_usuarios()
+    elif menu == "📜 Histórico do Sistema" and st.session_state.role == "admin":
+      tela_historico()
