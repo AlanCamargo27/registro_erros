@@ -6,7 +6,6 @@ import streamlit as st
 from sqlalchemy import create_engine, text
 
 def get_engine():
-  # Tenta obter a DATABASE_URL das secrets de forma segura
   try:
     url = st.secrets["DATABASE_URL"]
   except Exception:
@@ -35,7 +34,7 @@ def init_db():
         )
     """))
 
-    # 2. Inserção segura do admin padrão (evita UniqueViolation se já existir)
+    # 2. Inserção segura do admin padrão
     senha_padrao_hash = hash_senha("123456")
     conn.execute(
         text("""
@@ -217,7 +216,6 @@ def inserir_registro(
     )
 
 
-@st.cache_data(ttl=60)
 def carregar_todos_registros():
   engine = get_engine()
   df = pd.read_sql("SELECT * FROM registros ORDER BY id DESC", engine)
