@@ -5,15 +5,19 @@ import pandas as pd
 import streamlit as st
 from sqlalchemy import create_engine, text
 
-# Pega a URL do banco configurada de forma segura no Streamlit Cloud
-DATABASE_URL = st.secrets.get("DATABASE_URL")
-
 def get_engine():
-  DATABASE_URL = st.secrets.get("DATABASE_URL")
-  if not DATABASE_URL:
-    st.error("⚠️ A variável DATABASE_URL não foi encontrada nas Secrets do Streamlit Cloud! Configure-a em Settings > Secrets.")
+  # Tenta obter a DATABASE_URL das secrets de forma segura
+  try:
+    url = st.secrets["DATABASE_URL"]
+  except Exception:
+    url = None
+
+  if not url:
+    st.error("⚠️ A variável `DATABASE_URL` não foi encontrada nas Secrets do Streamlit Cloud!")
+    st.info("Para resolver: Vá ao painel do Streamlit Cloud, clique em **Settings > Secrets** e adicione a sua string do Supabase no formato correto.")
     st.stop()
-  return create_engine(DATABASE_URL)
+
+  return create_engine(url)
 
 def hash_senha(senha):
   return hashlib.sha256(senha.encode()).hexdigest()
