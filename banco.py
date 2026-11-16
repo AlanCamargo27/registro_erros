@@ -130,7 +130,6 @@ def alterar_senha(username, senha_atual, nova_senha):
           text("UPDATE usuarios SET senha_hash = :ns WHERE username = :u"),
           {"ns": hash_senha(nova_senha), "u": username}
       )
-      st.cache_data.clear()
       return True
   return False
 
@@ -164,12 +163,10 @@ def atualizar_dados_usuario(username_atual, novo_username, novo_nome):
           text("UPDATE registros SET conferente_nome = :nn WHERE conferente_user = :ua"),
           {"nn": novo_nome, "ua": username_atual}
       )
-  st.cache_data.clear()
   return True, "Dados atualizados com sucesso!"
 
 
 # --- SEPARADORES ---
-@st.cache_data(ttl=60)
 def get_separadores():
   engine = get_engine()
   df = pd.read_sql("SELECT nome FROM separadores ORDER BY nome", engine)
@@ -180,14 +177,12 @@ def adicionar_separador(nome):
   engine = get_engine()
   with engine.begin() as conn:
     conn.execute(text("INSERT INTO separadores (nome) VALUES (:n)"), {"n": nome})
-  st.cache_data.clear()
 
 
 def remover_separador(nome):
   engine = get_engine()
   with engine.begin() as conn:
     conn.execute(text("DELETE FROM separadores WHERE nome = :n"), {"n": nome})
-  st.cache_data.clear()
 
 
 # --- REGISTROS DE ERROS ---
@@ -220,14 +215,13 @@ def inserir_registro(
             "obs": observacao,
         }
     )
-  st.cache_data.clear()
-
 
 
 def carregar_todos_registros():
   engine = get_engine()
   df = pd.read_sql("SELECT * FROM registros ORDER BY id DESC", engine)
   return df
+
 
 def carregar_registros_por_conferente(username):
   engine = get_engine()
@@ -246,7 +240,6 @@ def solicitar_edicao_registro(id_reg, dados_dict):
         text("UPDATE registros SET status_edicao = 'Pendente', dados_pendentes = :dp WHERE id = :id"),
         {"dp": json.dumps(dados_dict), "id": int(id_reg)}
     )
-  st.cache_data.clear()
 
 
 def aprovar_edicao(id_reg, novos):
@@ -269,7 +262,6 @@ def aprovar_edicao(id_reg, novos):
             "id": id_reg,
         }
     )
-  st.cache_data.clear()
 
 
 def rejeitar_edicao(id_reg):
@@ -279,14 +271,12 @@ def rejeitar_edicao(id_reg):
         text("UPDATE registros SET status_edicao = 'Rejeitado', dados_pendentes = NULL WHERE id = :id"),
         {"id": id_reg}
     )
-  st.cache_data.clear()
 
 
 def excluir_registro(id_reg):
   engine = get_engine()
   with engine.begin() as conn:
     conn.execute(text("DELETE FROM registros WHERE id = :id"), {"id": id_reg})
-  st.cache_data.clear()
 
 
 def excluir_multiplos_registros(ids_lista):
@@ -298,7 +288,6 @@ def excluir_multiplos_registros(ids_lista):
         text("DELETE FROM registros WHERE id = ANY(:ids)"),
         {"ids": ids_lista}
     )
-  st.cache_data.clear()
 
 
 def zerar_registros_e_ids():
@@ -309,7 +298,6 @@ def zerar_registros_e_ids():
       conn.execute(text("ALTER SEQUENCE registros_id_seq RESTART WITH 1"))
     except Exception:
       pass
-  st.cache_data.clear()
 
 
 # --- SOLICITAÇÃO DE EXCLUSÃO PELO GESTOR ---
@@ -329,7 +317,6 @@ def solicitar_exclusao_registros(ids_lista, username, nome):
             "dp": json.dumps(ids_lista),
         }
     )
-  st.cache_data.clear()
 
 
 # --- AUDITORIA ---
@@ -351,7 +338,6 @@ def registrar_auditoria(username, nome, acao, detalhes):
     )
 
 
-@st.cache_data(ttl=60)
 def carregar_auditoria():
   engine = get_engine()
   df = pd.read_sql("SELECT * FROM auditoria ORDER BY id DESC", engine)
@@ -366,10 +352,8 @@ def criar_usuario(username, nome, role="conferente"):
         text("INSERT INTO usuarios VALUES (:u, :n, :s, :r)"),
         {"u": username.strip().lower(), "n": nome, "s": hash_senha("123456"), "r": role}
     )
-  st.cache_data.clear()
 
 
-@st.cache_data(ttl=60)
 def listar_usuarios():
   engine = get_engine()
   df = pd.read_sql(
@@ -386,11 +370,9 @@ def resetar_senha_usuario(username):
         text("UPDATE usuarios SET senha_hash = :s WHERE username = :u"),
         {"s": hash_senha("123456"), "u": username}
     )
-  st.cache_data.clear()
 
 
 def excluir_usuario(username):
   engine = get_engine()
   with engine.begin() as conn:
     conn.execute(text("DELETE FROM usuarios WHERE username = :u"), {"u": username})
-  st.cache_data.clear()

@@ -115,6 +115,7 @@ def tela_publica():
   st.caption("Painel interativo. Utilize os filtros abaixo para analisar os dados.")
 
   df_geral = banco.carregar_todos_registros()
+  # Filtra apenas registros aprovados reais para o painel público (ignorando pendências de exclusão)
   if "status_edicao" in df_geral.columns:
     df_geral = df_geral[df_geral["status_edicao"] != "Pendente_Exclusao"]
 
@@ -226,62 +227,64 @@ def tela_publica():
   col_g1, col_g2 = st.columns(2)
 
   with col_g1:
-    st.markdown("### Erros por Separador")
-    todos_separadores = banco.get_separadores()
-    if not todos_separadores:
-      st.info("Nenhum separador cadastrado no sistema.")
-    else:
-      if not df_filtrado.empty:
-        ranking_sep = df_filtrado.groupby("separador").agg(
-            Erros=("id", "count"), Divergentes=("qtd_divergente", "sum")
-        ).reset_index()
+    with st.container():
+      st.markdown("### Erros por Separador")
+      todos_separadores = banco.get_separadores()
+      if not todos_separadores:
+        st.info("Nenhum separador cadastrado no sistema.")
       else:
-        ranking_sep = pd.DataFrame(columns=["separador", "Erros", "Divergentes"])
+        if not df_filtrado.empty:
+          ranking_sep = df_filtrado.groupby("separador").agg(
+              Erros=("id", "count"), Divergentes=("qtd_divergente", "sum")
+          ).reset_index()
+        else:
+          ranking_sep = pd.DataFrame(columns=["separador", "Erros", "Divergentes"])
 
-      df_todos_seps = pd.DataFrame({"separador": todos_separadores})
-      ranking_sep = pd.merge(df_todos_seps, ranking_sep, on="separador", how="left")
-      ranking_sep["Erros"] = ranking_sep["Erros"].fillna(0).astype(int)
-      ranking_sep["Divergentes"] = ranking_sep["Divergentes"].fillna(0).astype(int)
+        df_todos_seps = pd.DataFrame({"separador": todos_separadores})
+        ranking_sep = pd.merge(df_todos_seps, ranking_sep, on="separador", how="left")
+        ranking_sep["Erros"] = ranking_sep["Erros"].fillna(0).astype(int)
+        ranking_sep["Divergentes"] = ranking_sep["Divergentes"].fillna(0).astype(int)
 
-      max_erros = max(ranking_sep["Erros"]) if not ranking_sep.empty else 1
-      if max_erros == 0:
-        max_erros = 3
+        max_erros = max(ranking_sep["Erros"]) if not ranking_sep.empty else 1
+        if max_erros == 0:
+          max_erros = 3
 
-      ranking_sep["erros_plot"] = ranking_sep["Erros"].apply(lambda x: 0.15 if x == 0 else x)
-      ranking_sep = ranking_sep.sort_values(by=["Erros", "Divergentes"], ascending=[True, True])
+        ranking_sep["erros_plot"] = ranking_sep["Erros"].apply(lambda x: 0.15 if x == 0 else x)
+        ranking_sep = ranking_sep.sort_values(by=["Erros", "Divergentes"], ascending=[True, True])
 
-      fig_sep = px.bar(
-          ranking_sep, x="erros_plot", y="separador", orientation="h", text="Erros",
-          color="Erros", color_continuous_scale="RdYlGn_r", range_color=[0, max_erros]
-      )
-      fig_sep.update_traces(textposition="outside", texttemplate="%{text}", cliponaxis=False)
-      fig_sep.update_xaxes(tickmode="linear", dtick=1, range=[-0.1, max_erros + 0.8])
-      fig_sep.update_layout(
-          yaxis={"categoryorder": "array", "categoryarray": ranking_sep["separador"].tolist(), "title": "Separador"},
-          xaxis_title="Erros", margin=dict(l=0, r=30, t=20, b=0), height=350,
-      )
-      st.plotly_chart(fig_sep, use_container_width=True, key="grafico_separador_pub")
+        fig_sep = px.bar(
+            ranking_sep, x="erros_plot", y="separador", orientation="h", text="Erros",
+            color="Erros", color_continuous_scale="RdYlGn_r", range_color=[0, max_erros]
+        )
+        fig_sep.update_traces(textposition="outside", texttemplate="%{text}", cliponaxis=False)
+        fig_sep.update_xaxes(tickmode="linear", dtick=1, range=[-0.1, max_erros + 0.8])
+        fig_sep.update_layout(
+            yaxis={"categoryorder": "array", "categoryarray": ranking_sep["separador"].tolist(), "title": "Separador"},
+            xaxis_title="Erros", margin=dict(l=0, r=30, t=20, b=0), height=350,
+        )
+        st.plotly_chart(fig_sep, use_container_width=True, key="grafico_separador_pub")
 
   with col_g2:
-    st.markdown("### Tipos de Erros Mais Comuns")
-    if df_filtrado.empty:
-      st.info("Sem dados para exibir.")
-    else:
-      ranking_erro = df_filtrado["tipo_erro"].value_counts().reset_index()
-      ranking_erro.columns = ["Tipo de Erro", "Erros"]
-      ranking_erro = ranking_erro.sort_values(by="Erros", ascending=False)
+    with st.container():
+      st.markdown("### Tipos de Erros Mais Comuns")
+      if df_filtrado.empty:
+        st.info("Sem dados para exibir.")
+      else:
+        ranking_erro = df_filtrado["tipo_erro"].value_counts().reset_index()
+        ranking_erro.columns = ["Tipo de Erro", "Erros"]
+        ranking_erro = ranking_erro.sort_values(by="Erros", ascending=False)
 
-      fig_erro = px.bar(
-          ranking_erro, x="Tipo de Erro", y="Erros", text="Erros", color="Erros", color_continuous_scale="Blues"
-      )
-      fig_erro.update_traces(textposition="outside", texttemplate="%{text}", cliponaxis=False)
-      max_erros_erro = max(ranking_erro["Erros"]) if not ranking_erro.empty else 1
-      fig_erro.update_yaxes(range=[0, max_erros_erro + max_erros_erro * 0.25 if max_erros_erro > 0 else 3])
-      fig_erro.update_layout(
-          xaxis={"title": "Tipo de Erro", "tickangle": -20, "categoryorder": "array", "categoryarray": ranking_erro["Tipo de Erro"].tolist()},
-          yaxis_title="Quantidade", margin=dict(l=0, r=0, t=30, b=0), height=350,
-      )
-      st.plotly_chart(fig_erro, use_container_width=True, key="grafico_erro_pub")
+        fig_erro = px.bar(
+            ranking_erro, x="Tipo de Erro", y="Erros", text="Erros", color="Erros", color_continuous_scale="Blues"
+        )
+        fig_erro.update_traces(textposition="outside", texttemplate="%{text}", cliponaxis=False)
+        max_erros_erro = max(ranking_erro["Erros"]) if not ranking_erro.empty else 1
+        fig_erro.update_yaxes(range=[0, max_erros_erro + max_erros_erro * 0.25 if max_erros_erro > 0 else 3])
+        fig_erro.update_layout(
+            xaxis={"title": "Tipo de Erro", "tickangle": -20, "categoryorder": "array", "categoryarray": ranking_erro["Tipo de Erro"].tolist()},
+            yaxis_title="Quantidade", margin=dict(l=0, r=0, t=30, b=0), height=350,
+        )
+        st.plotly_chart(fig_erro, use_container_width=True, key="grafico_erro_pub")
 
   st.subheader("📈 Curva de Desempenho (Evolução Diária)")
   df_filtrado["data_dia"] = df_filtrado["data_obj"].dt.date
@@ -324,131 +327,134 @@ def tela_publica():
 # TELAS DO CONFERENTE
 # ==============================================================================
 def tela_registrar_ocorrencia():
-  st.title("📝 Registrar Nova Ocorrência")
-  separadores_brutos = banco.get_separadores()
+  with st.container():
+    st.title("📝 Registrar Nova Ocorrência")
+    separadores_brutos = banco.get_separadores()
 
-  if not separadores_brutos:
-    st.warning("Nenhum separador cadastrado. Solicite ao Administrador.")
-    return
+    if not separadores_brutos:
+      st.warning("Nenhum separador cadastrado. Solicite ao Administrador.")
+      return
 
-  separadores = ["-- Selecione o Separador --"] + separadores_brutos
-  tipos_erro_opcoes = ["-- Selecione o Tipo de Erro --"] + TIPOS_ERRO
+    separadores = ["-- Selecione o Separador --"] + separadores_brutos
+    
+    tipos_erro_opcoes = ["-- Selecione o Tipo de Erro --"] + TIPOS_ERRO
 
-  with st.form("form_novo_erro_conf", clear_on_submit=True):
-    col1, col2 = st.columns(2)
-    with col1:
-      num_pedido = st.text_input(
-          "Número do Pedido *", placeholder="Ex: PED-1045", key="input_num_pedido_reg"
-      )
-      separador = st.selectbox("Separador *", separadores, index=0, key="select_separador_reg")
-      sku_produto = st.text_input(
-          "Código/SKU do Produto", placeholder="Ex: 78912345", key="input_sku_reg"
-      )
-
-    with col2:
-      st.text_input(
-          "Conferente Responsável", value=st.session_state.nome, disabled=True, key="input_conf_resp"
-      )
-      tipo_erro = st.selectbox("Tipo de Erro *", tipos_erro_opcoes, index=0, key="select_tipo_erro_reg")
-      qtd_divergente = st.number_input(
-          "Quantidade Divergente *", min_value=0, value=0, step=1, key="num_qtd_div_reg"
-      )
-
-    observacao = st.text_area("Observações adicionais", key="text_obs_reg")
-
-    if st.form_submit_button("💾 Salvar Ocorrência", use_container_width=True):
-      erros_validacao = []
-
-      if not num_pedido.strip():
-        erros_validacao.append("O **Número do Pedido** é obrigatório.")
-      if separador == "-- Selecione o Separador --":
-        erros_validacao.append(
-            "Você deve **selecionar o separador** responsável pelo erro."
+    with st.form("form_novo_erro_conf", clear_on_submit=True):
+      col1, col2 = st.columns(2)
+      with col1:
+        num_pedido = st.text_input(
+            "Número do Pedido *", placeholder="Ex: PED-1045", key="input_num_pedido_reg"
         )
-      if tipo_erro == "-- Selecione o Tipo de Erro --":
-        erros_validacao.append(
-            "Você deve **selecionar o tipo de erro** ocorrido."
-        )
-      if qtd_divergente <= 0:
-        erros_validacao.append(
-            "A **Quantidade Divergente** deve ser maior que zero (0)."
+        separador = st.selectbox("Separador *", separadores, index=0, key="select_separador_reg")
+        sku_produto = st.text_input(
+            "Código/SKU do Produto", placeholder="Ex: 78912345", key="input_sku_reg"
         )
 
-      if erros_validacao:
-        for err in erros_validacao:
-          st.error(f"⚠️ {err}")
-      else:
-        banco.inserir_registro(
-            num_pedido.strip().upper(),
-            st.session_state.username,
-            st.session_state.nome,
-            separador,
-            tipo_erro,
-            sku_produto.strip().upper(),
-            qtd_divergente,
-            observacao,
+      with col2:
+        st.text_input(
+            "Conferente Responsável", value=st.session_state.nome, disabled=True, key="input_conf_resp"
         )
-        banco.registrar_auditoria(
-            st.session_state.username, st.session_state.nome,
-            "REGISTRAR_OCORRENCIA", f"Registrou divergência no pedido {num_pedido.strip().upper()}."
+        tipo_erro = st.selectbox("Tipo de Erro *", tipos_erro_opcoes, index=0, key="select_tipo_erro_reg")
+        qtd_divergente = st.number_input(
+            "Quantidade Divergente *", min_value=0, value=0, step=1, key="num_qtd_div_reg"
         )
-        st.success("✅ Ocorrência registrada com sucesso!")
+
+      observacao = st.text_area("Observações adicionais", key="text_obs_reg")
+
+      if st.form_submit_button("💾 Salvar Ocorrência", use_container_width=True):
+        erros_validacao = []
+
+        if not num_pedido.strip():
+          erros_validacao.append("O **Número do Pedido** é obrigatório.")
+        if separador == "-- Selecione o Separador --":
+          erros_validacao.append(
+              "Você deve **selecionar o separador** responsável pelo erro."
+          )
+        if tipo_erro == "-- Selecione o Tipo de Erro --":
+          erros_validacao.append(
+              "Você deve **selecionar o tipo de erro** ocorrido."
+          )
+        if qtd_divergente <= 0:
+          erros_validacao.append(
+              "A **Quantidade Divergente** deve ser maior que zero (0)."
+          )
+
+        if erros_validacao:
+          for err in erros_validacao:
+            st.error(f"⚠️ {err}")
+        else:
+          banco.inserir_registro(
+              num_pedido.strip().upper(),
+              st.session_state.username,
+              st.session_state.nome,
+              separador,
+              tipo_erro,
+              sku_produto.strip().upper(),
+              qtd_divergente,
+              observacao,
+          )
+          banco.registrar_auditoria(
+              st.session_state.username, st.session_state.nome,
+              "REGISTRAR_OCORRENCIA", f"Registrou divergência no pedido {num_pedido.strip().upper()}."
+          )
+          st.success("✅ Ocorrência registrada com sucesso!")
 
 
 def tela_meus_registros():
-  st.title("📋 Meus Registros")
-  df = banco.carregar_registros_por_conferente(st.session_state.username)
+  with st.container():
+    st.title("📋 Meus Registros")
+    df = banco.carregar_registros_por_conferente(st.session_state.username)
 
-  if df.empty:
-    st.info("Você ainda não registrou nenhuma ocorrência.")
-    return
+    if df.empty:
+      st.info("Você ainda não registrou nenhuma ocorrência.")
+      return
 
-  st.dataframe(
-      df[["id", "data_hora", "num_pedido", "separador", "tipo_erro", "sku_produto", "qtd_divergente", "status_edicao"]],
-      use_container_width=True,
-      hide_index=True,
-  )
+    st.dataframe(
+        df[["id", "data_hora", "num_pedido", "separador", "tipo_erro", "sku_produto", "qtd_divergente", "status_edicao"]],
+        use_container_width=True,
+        hide_index=True,
+    )
 
-  st.divider()
-  st.subheader("✏️ Solicitar Edição de Registro")
-  st.caption("A alteração ficará com status 'Pendente' e só entrará em vigor após aprovação do Administrador ou Gestor.")
+    st.divider()
+    st.subheader("✏️ Solicitar Edição de Registro")
+    st.caption("A alteração ficará com status 'Pendente' e só entrará em vigor após aprovação do Administrador ou Gestor.")
 
-  id_selecionado = st.selectbox("Selecione o ID do registro para editar", df["id"], key="select_id_edicao_conf")
-  reg_atual = df[df["id"] == id_selecionado].iloc[0]
+    id_selecionado = st.selectbox("Selecione o ID do registro para editar", df["id"], key="select_id_edicao_conf")
+    reg_atual = df[df["id"] == id_selecionado].iloc[0]
 
-  if reg_atual["status_edicao"] == "Pendente":
-    st.warning("⚠️ Este registro já possui uma edição aguardando aprovação.")
-  else:
-    separadores = banco.get_separadores()
-    idx_sep = separadores.index(reg_atual["separador"]) if reg_atual["separador"] in separadores else 0
-    idx_erro = TIPOS_ERRO.index(reg_atual["tipo_erro"]) if reg_atual["tipo_erro"] in TIPOS_ERRO else 0
+    if reg_atual["status_edicao"] == "Pendente":
+      st.warning("⚠️ Este registro já possui uma edição aguardando aprovação.")
+    else:
+      separadores = banco.get_separadores()
+      idx_sep = separadores.index(reg_atual["separador"]) if reg_atual["separador"] in separadores else 0
+      idx_erro = TIPOS_ERRO.index(reg_atual["tipo_erro"]) if reg_atual["tipo_erro"] in TIPOS_ERRO else 0
 
-    with st.form("form_editar_conferente_unico"):
-      c1, c2 = st.columns(2)
-      novo_pedido = c1.text_input("Número do Pedido", value=reg_atual["num_pedido"], key="edit_num_pedido")
-      novo_sep = c1.selectbox("Separador", separadores, index=idx_sep, key="edit_separador")
-      novo_sku = c1.text_input("SKU", value=reg_atual["sku_produto"], key="edit_sku")
+      with st.form("form_editar_conferente_unico"):
+        c1, c2 = st.columns(2)
+        novo_pedido = c1.text_input("Número do Pedido", value=reg_atual["num_pedido"], key="edit_num_pedido")
+        novo_sep = c1.selectbox("Separador", separadores, index=idx_sep, key="edit_separador")
+        novo_sku = c1.text_input("SKU", value=reg_atual["sku_produto"], key="edit_sku")
 
-      novo_erro = c2.selectbox("Tipo de Erro", TIPOS_ERRO, index=idx_erro, key="edit_tipo_erro")
-      nova_qtd = c2.number_input("Quantidade", min_value=0, value=int(reg_atual["qtd_divergente"]), key="edit_qtd")
-      nova_obs = st.text_area("Observação", value=reg_atual["observacao"], key="edit_obs")
+        novo_erro = c2.selectbox("Tipo de Erro", TIPOS_ERRO, index=idx_erro, key="edit_tipo_erro")
+        nova_qtd = c2.number_input("Quantidade", min_value=0, value=int(reg_atual["qtd_divergente"]), key="edit_qtd")
+        nova_obs = st.text_area("Observação", value=reg_atual["observacao"], key="edit_obs")
 
-      if st.form_submit_button("📤 Enviar Edição para Aprovação"):
-        dados_novos = {
-            "num_pedido": novo_pedido.strip().upper(),
-            "separador": novo_sep,
-            "sku_produto": novo_sku.strip().upper(),
-            "tipo_erro": novo_erro,
-            "qtd_divergente": nova_qtd,
-            "observacao": nova_obs,
-        }
-        banco.solicitar_edicao_registro(id_selecionado, dados_novos)
-        banco.registrar_auditoria(
-            st.session_state.username, st.session_state.nome,
-            "SOLICITAR_EDICAO", f"Solicitou edição do registro ID #{id_selecionado}."
-        )
-        st.success("Solicitação enviada! Aguarde a aprovação.")
-        st.rerun()
+        if st.form_submit_button("📤 Enviar Edição para Aprovação"):
+          dados_novos = {
+              "num_pedido": novo_pedido.strip().upper(),
+              "separador": novo_sep,
+              "sku_produto": novo_sku.strip().upper(),
+              "tipo_erro": novo_erro,
+              "qtd_divergente": nova_qtd,
+              "observacao": nova_obs,
+          }
+          banco.solicitar_edicao_registro(id_selecionado, dados_novos)
+          banco.registrar_auditoria(
+              st.session_state.username, st.session_state.nome,
+              "SOLICITAR_EDICAO", f"Solicitou edição do registro ID #{id_selecionado}."
+          )
+          st.success("Solicitação enviada! Aguarde a aprovação.")
+          st.rerun()
 
 
 # ==============================================================================
@@ -506,29 +512,30 @@ def tela_meu_perfil():
             else:
               st.error("Senha atual incorreta.")
   else:
-    st.title("🔑 Alterar Minha Senha")
-    st.caption(f"Usuário logado: **{st.session_state.username}** ({st.session_state.nome}) - Perfil: **{st.session_state.role.upper()}**")
-    
-    with st.form("form_senha_gestor_conf_unico"):
-      senha_atual = st.text_input("Senha Atual", type="password", key="pwd_atual_g")
-      nova_senha = st.text_input("Nova Senha", type="password", key="pwd_nova_g")
-      confirma_senha = st.text_input("Confirme a Nova Senha", type="password", key="pwd_confirma_g")
+    with st.container():
+      st.title("🔑 Alterar Minha Senha")
+      st.caption(f"Usuário logado: **{st.session_state.username}** ({st.session_state.nome}) - Perfil: **{st.session_state.role.upper()}**")
+      
+      with st.form("form_senha_gestor_conf_unico"):
+        senha_atual = st.text_input("Senha Atual", type="password", key="pwd_atual_g")
+        nova_senha = st.text_input("Nova Senha", type="password", key="pwd_nova_g")
+        confirma_senha = st.text_input("Confirme a Nova Senha", type="password", key="pwd_confirma_g")
 
-      if st.form_submit_button("Atualizar Senha"):
-        if nova_senha != confirma_senha:
-          st.error("As novas senhas não coincidem.")
-        elif len(nova_senha) < 4:
-          st.error("A senha deve ter pelo menos 4 caracteres.")
-        else:
-          sucesso = banco.alterar_senha(st.session_state.username, senha_atual, nova_senha)
-          if sucesso:
-            banco.registrar_auditoria(
-                st.session_state.username, st.session_state.nome,
-                "ALTERAR_SENHA", f"Usuário ({st.session_state.role}) alterou sua senha."
-            )
-            st.success("Senha alterada com sucesso!")
+        if st.form_submit_button("Atualizar Senha"):
+          if nova_senha != confirma_senha:
+            st.error("As novas senhas não coincidem.")
+          elif len(nova_senha) < 4:
+            st.error("A senha deve ter pelo menos 4 caracteres.")
           else:
-            st.error("Senha atual incorreta.")
+            sucesso = banco.alterar_senha(st.session_state.username, senha_atual, nova_senha)
+            if sucesso:
+              banco.registrar_auditoria(
+                  st.session_state.username, st.session_state.nome,
+                  "ALTERAR_SENHA", f"Usuário ({st.session_state.role}) alterou sua senha."
+              )
+              st.success("Senha alterada com sucesso!")
+            else:
+              st.error("Senha atual incorreta.")
 
 
 # ==============================================================================
@@ -618,7 +625,6 @@ def tela_aprovacoes():
 def tela_admin_registros():
   st.title("🗂️ Gestão Total de Registros")
   df = banco.carregar_todos_registros()
-  
   if "status_edicao" in df.columns:
     df = df[df["status_edicao"] != "Pendente_Exclusao"]
 
@@ -626,65 +632,60 @@ def tela_admin_registros():
     st.info("Nenhum registro encontrado no sistema.")
     return
 
-  colunas_exibir = [
-      "id", "data_hora", "num_pedido", "separador", "tipo_erro", "sku_produto", "qtd_divergente", "observacao", "conferente_nome"
-  ]
-  df_exibir = df[colunas_exibir].rename(
-      columns={
-          "id": "ID", "data_hora": "Data/Hora", "num_pedido": "Pedido", "separador": "Separador",
-          "tipo_erro": "Tipo de Erro", "sku_produto": "SKU", "qtd_divergente": "Qtd",
-          "observacao": "Observação", "conferente_nome": "Conferente",
-      }
-  )
-  
-  st.dataframe(df_exibir, use_container_width=True, hide_index=True)
+  st.markdown("### 🗑️ Exclusão em Massa por Seleção")
+  st.caption("Marque a caixa na coluna **'Excluir?'** nos registros que deseja apagar e clique no botão.")
 
-  st.divider()
-  st.markdown("### 🗑️ Exclusão em Massa por Seleção de ID")
-  st.caption("Selecione abaixo os registos que deseja apagar.")
+  df_edit = df.drop(columns=["dados_pendentes"], errors="ignore").copy()
+  df_edit.insert(0, "Excluir", False)
 
-  opcoes_map = {
-      f"ID #{row['id']} — Pedido: {row['num_pedido']} ({row['separador']} - {row['tipo_erro']})": row['id']
-      for _, row in df.iterrows()
-  }
-
-  ids_selecionados_texto = st.multiselect(
-      "Selecione os registos para exclusão:",
-      options=list(opcoes_map.keys()),
-      key="multiselect_exclusao_massa"
+  df_resultado = st.data_editor(
+      df_edit,
+      column_config={
+          "Excluir": st.column_config.CheckboxColumn(
+              "Excluir?", help="Marque para selecionar este registro", default=False
+          )
+      },
+      disabled=[col for col in df_edit.columns if col != "Excluir"],
+      hide_index=True,
+      use_container_width=True,
+      key="tabela_exclusao_massa",
   )
 
-  ids_para_excluir = [opcoes_map[t] for t in ids_selecionados_texto]
+  ids_para_excluir = df_resultado[df_resultado["Excluir"] == True]["id"].tolist()
 
-  if ids_para_excluir:
-    st.warning(f"⚠️ {len(ids_para_excluir)} registo(s) selecionado(s) para exclusão.")
-    
-    if st.session_state.role == "admin":
-      if st.button("🗑️ Confirmar Exclusão dos Selecionados", type="primary", use_container_width=True):
-        banco.excluir_multiplos_registros(ids_para_excluir)
-        banco.registrar_auditoria(
-            st.session_state.username, st.session_state.nome,
-            "EXCLUIR_REGISTROS", f"Administrador excluiu os IDs: {ids_para_excluir}"
-        )
-        st.success(f"{len(ids_para_excluir)} registo(s) excluído(s) com sucesso!")
-        st.rerun()
+  col_b1, col_b2 = st.columns([2, 4])
+  with col_b1:
+    if ids_para_excluir:
+      st.warning(f"⚠️ {len(ids_para_excluir)} registro(s) selecionado(s).")
+      
+      if st.session_state.role == "admin":
+        if st.button("🗑️ Excluir Selecionados", type="primary", use_container_width=True):
+          banco.excluir_multiplos_registros(ids_para_excluir)
+          banco.registrar_auditoria(
+              st.session_state.username, st.session_state.nome,
+              "EXCLUIR_REGISTROS", f"Administrador excluiu os IDs: {ids_para_excluir}"
+          )
+          st.success(f"{len(ids_para_excluir)} registro(s) excluído(s) com sucesso!")
+          st.rerun()
+      else:
+        if st.button("📤 Solicitar Exclusão ao Administrador", type="primary", use_container_width=True):
+          banco.solicitar_exclusao_registros(
+              ids_para_excluir, st.session_state.username, st.session_state.nome
+          )
+          banco.registrar_auditoria(
+              st.session_state.username, st.session_state.nome,
+              "SOLICITAR_EXCLUSAO", f"Gestor solicitou exclusão dos IDs: {ids_para_excluir}"
+          )
+          st.success("Solicitação de exclusão enviada para aprovação do Administrador!")
+          st.rerun()
     else:
-      if st.button("📤 Solicitar Exclusão ao Administrador", type="primary", use_container_width=True):
-        banco.solicitar_exclusao_registros(
-            ids_para_excluir, st.session_state.username, st.session_state.nome
-        )
-        banco.registrar_auditoria(
-            st.session_state.username, st.session_state.nome,
-            "SOLICITAR_EXCLUSAO", f"Gestor solicitou exclusão dos IDs: {ids_para_excluir}"
-        )
-        st.success("Solicitação de exclusão enviada para aprovação do Administrador!")
-        st.rerun()
+      st.info("Nenhum registro selecionado.")
 
   if st.session_state.role == "admin":
     st.divider()
     st.markdown("### ⚠️ Zona de Perigo (Apenas Administrador)")
     with st.expander("🗑️ Zerar Base de Registros e Reiniciar IDs"):
-      st.warning("Isso apagará **todos** os registos de erros do sistema permanentemente e reiniciará a contagem dos IDs do zero.")
+      st.warning("Isso apagará **todos** os registros de erros do sistema permanentemente e reiniciará a contagem dos IDs do zero.")
       confirma_zerar = st.text_input("Digite 'ZERAR' para confirmar:", key="input_confirma_zerar")
       if st.button("🚨 Zerar Todos os Registros e IDs", type="primary"):
         if confirma_zerar == "ZERAR":
@@ -856,24 +857,27 @@ def tela_historico():
 
 
 # ==============================================================================
-# ROTEAMENTO PRINCIPAL (LIMPO E DIRETO SEM CONTAINER EXTERNO)
+# ROTEAMENTO PRINCIPAL
 # ==============================================================================
-if not st.session_state.logged_in:
-  tela_publica()
-else:
-  if menu == "📊 Painel Público":
+container_principal = st.container()
+
+with container_principal:
+  if not st.session_state.logged_in:
     tela_publica()
-  elif menu == "📝 Registrar Ocorrência":
-    tela_registrar_ocorrencia()
-  elif menu == "📋 Meus Registros":
-    tela_meus_registros()
-  elif menu == "⚙️ Meu Perfil e Senha":
-    tela_meu_perfil()
-  elif menu == "⏳ Aprovações Pendentes":
-    tela_aprovacoes()
-  elif menu == "🗂️ Todos os Registros":
-    tela_admin_registros()
-  elif menu == "👥 Usuários e Cadastros":
-    tela_admin_usuarios()
-  elif menu == "📜 Histórico do Sistema" and st.session_state.role == "admin":
-    tela_historico()
+  else:
+    if menu == "📊 Painel Público":
+      tela_publica()
+    elif menu == "📝 Registrar Ocorrência":
+      tela_registrar_ocorrencia()
+    elif menu == "📋 Meus Registros":
+      tela_meus_registros()
+    elif menu == "⚙️ Meu Perfil e Senha":
+      tela_meu_perfil()
+    elif menu == "⏳ Aprovações Pendentes":
+      tela_aprovacoes()
+    elif menu == "🗂️ Todos os Registros":
+      tela_admin_registros()
+    elif menu == "👥 Usuários e Cadastros":
+      tela_admin_usuarios()
+    elif menu == "📜 Histórico do Sistema" and st.session_state.role == "admin":
+      tela_historico()
