@@ -1,47 +1,44 @@
-<<<<<<< HEAD
 from datetime import datetime
 import hashlib
 import json
-import sqlite3
 import pandas as pd
+import streamlit as st
+from sqlalchemy import create_engine, text
 
-DB_NAME = "erros_separacao_v2.db"
+# Pega a URL do banco configurada de forma segura no Streamlit Cloud
+DATABASE_URL = st.secrets.get("DATABASE_URL")
 
+def get_engine():
+  return create_engine(DATABASE_URL)
 
 def hash_senha(senha):
   return hashlib.sha256(senha.encode()).hexdigest()
 
-
-def get_conn():
-  return sqlite3.connect(DB_NAME, check_same_thread=False)
-
-
 def init_db():
-  conn = get_conn()
-  c = conn.cursor()
-
-  # Tabela de Usuários
-  c.execute("""
+  engine = get_engine()
+  with engine.begin() as conn:
+    # Tabela de Usuários
+    conn.execute(text("""
         CREATE TABLE IF NOT EXISTS usuarios (
             username TEXT PRIMARY KEY,
             nome TEXT NOT NULL,
             senha_hash TEXT NOT NULL,
             role TEXT NOT NULL
         )
-    """)
+    """))
 
-  # Tabela de Separadores
-  c.execute("""
+    # Tabela de Separadores
+    conn.execute(text("""
         CREATE TABLE IF NOT EXISTS separadores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             nome TEXT UNIQUE NOT NULL
         )
-    """)
+    """))
 
-  # Tabela de Registros de Erros
-  c.execute("""
+    # Tabela de Registros de Erros
+    conn.execute(text("""
         CREATE TABLE IF NOT EXISTS registros (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             data_hora TEXT,
             num_pedido TEXT,
             conferente_user TEXT,
@@ -54,134 +51,119 @@ def init_db():
             status_edicao TEXT DEFAULT 'Aprovado',
             dados_pendentes TEXT
         )
-    """)
+    """))
 
-  # Tabela de Auditoria / Histórico de Ações
-  c.execute("""
+    # Tabela de Auditoria / Histórico de Ações
+    conn.execute(text("""
         CREATE TABLE IF NOT EXISTS auditoria (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             data_hora TEXT,
             usuario TEXT,
             nome TEXT,
             acao TEXT,
             detalhes TEXT
         )
-    """)
+    """))
 
-  # Criar Admin padrão se não existir
-  c.execute("SELECT * FROM usuarios WHERE username = 'admin'")
-  if not c.fetchone():
-    c.execute(
-        "INSERT INTO usuarios VALUES (?, ?, ?, ?)",
-        ("admin", "Administrador", hash_senha("admin123"), "admin"),
-    )
+    # Criar Admin padrão se não existir
+    res = conn.execute(text("SELECT * FROM usuarios WHERE username = 'admin'")).fetchone()
+    if not res:
+      conn.execute(
+          text("INSERT INTO usuarios VALUES (:u, :n, :s, :r)"),
+          {"u": "admin", "n": "Administrador", "s": hash_senha("admin123"), "r": "admin"}
+      )
 
-  # Criar separadores iniciais se estiver vazio
-  c.execute("SELECT COUNT(*) FROM separadores")
-  if c.fetchone()[0] == 0:
-    iniciais = [
-        ("João Silva",),
-        ("Pedro Santos",),
-        ("Lucas Oliveira",),
-        ("Fernanda Alves",),
-    ]
-    c.executemany("INSERT INTO separadores (nome) VALUES (?)", iniciais)
-
-  conn.commit()
-  conn.close()
-
+    # Criar separadores iniciais se estiver vazio
+    count_seps = conn.execute(text("SELECT COUNT(*) FROM separadores")).scalar()
+    if count_seps == 0:
+      iniciais = [
+          {"nome": "João Silva"},
+          {"nome": "Pedro Santos"},
+          {"nome": "Lucas Oliveira"},
+          {"nome": "Fernanda Alves"},
+      ]
+      for item in iniciais:
+        conn.execute(
+            text("INSERT INTO separadores (nome) VALUES (:nome) ON CONFLICT (nome) DO NOTHING"),
+            item
+        )
 
 # --- AUTENTICAÇÃO E PERFIL ---
 def autenticar_usuario(username, senha):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      "SELECT nome, role FROM usuarios WHERE username = ? AND senha_hash = ?",
-      (username, hash_senha(senha)),
-  )
-  user = c.fetchone()
-  conn.close()
-  return user  # Retorna (nome, role) ou None
+  engine = get_engine()
+  with engine.connect() as conn:
+    res = conn.execute(
+        text("SELECT nome, role FROM usuarios WHERE username = :u AND senha_hash = :s"),
+        {"u": username, "s": hash_senha(senha)}
+    ).fetchone()
+  return res if res else None
 
 
 def alterar_senha(username, senha_atual, nova_senha):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      "SELECT * FROM usuarios WHERE username = ? AND senha_hash = ?",
-      (username, hash_senha(senha_atual)),
-  )
-  if c.fetchone():
-    c.execute(
-        "UPDATE usuarios SET senha_hash = ? WHERE username = ?",
-        (hash_senha(nova_senha), username),
-    )
-    conn.commit()
-    conn.close()
-    return True
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    user = conn.execute(
+        text("SELECT * FROM usuarios WHERE username = :u AND senha_hash = :s"),
+        {"u": username, "s": hash_senha(senha_atual)}
+    ).fetchone()
+    if user:
+      conn.execute(
+          text("UPDATE usuarios SET senha_hash = :ns WHERE username = :u"),
+          {"ns": hash_senha(nova_senha), "u": username}
+      )
+      return True
   return False
 
 
 def atualizar_dados_usuario(username_atual, novo_username, novo_nome):
-  conn = get_conn()
-  c = conn.cursor()
+  engine = get_engine()
   novo_username = novo_username.strip().lower()
 
-  if novo_username != username_atual:
-    c.execute("SELECT * FROM usuarios WHERE username = ?", (novo_username,))
-    if c.fetchone():
-      conn.close()
-      return (
-          False,
-          "Este login (usuário) já está em uso por outra conta.",
+  with engine.begin() as conn:
+    if novo_username != username_atual:
+      existe = conn.execute(
+          text("SELECT * FROM usuarios WHERE username = :u"), {"u": novo_username}
+      ).fetchone()
+      if existe:
+        return False, "Este login (usuário) já está em uso por outra conta."
+
+      conn.execute(
+          text("UPDATE usuarios SET username = :nu, nome = :nn WHERE username = :ua"),
+          {"nu": novo_username, "nn": novo_nome, "ua": username_atual}
       )
-
-    c.execute(
-        "UPDATE usuarios SET username = ?, nome = ? WHERE username = ?",
-        (novo_username, novo_nome, username_atual),
-    )
-    c.execute(
-        "UPDATE registros SET conferente_user = ?, conferente_nome = ? WHERE conferente_user = ?",
-        (novo_username, novo_nome, username_atual),
-    )
-  else:
-    c.execute(
-        "UPDATE usuarios SET nome = ? WHERE username = ?",
-        (novo_nome, username_atual),
-    )
-    c.execute(
-        "UPDATE registros SET conferente_nome = ? WHERE conferente_user = ?",
-        (novo_nome, username_atual),
-    )
-
-  conn.commit()
-  conn.close()
+      conn.execute(
+          text("UPDATE registros SET conferente_user = :nu, conferente_nome = :nn WHERE conferente_user = :ua"),
+          {"nu": novo_username, "nn": novo_nome, "ua": username_atual}
+      )
+    else:
+      conn.execute(
+          text("UPDATE usuarios SET nome = :nn WHERE username = :ua"),
+          {"nn": novo_nome, "ua": username_atual}
+      )
+      conn.execute(
+          text("UPDATE registros SET conferente_nome = :nn WHERE conferente_user = :ua"),
+          {"nn": novo_nome, "ua": username_atual}
+      )
   return True, "Dados atualizados com sucesso!"
 
 
 # --- SEPARADORES ---
 def get_separadores():
-  conn = get_conn()
-  df = pd.read_sql_query("SELECT nome FROM separadores ORDER BY nome", conn)
-  conn.close()
+  engine = get_engine()
+  df = pd.read_sql("SELECT nome FROM separadores ORDER BY nome", engine)
   return df["nome"].tolist()
 
 
 def adicionar_separador(nome):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute("INSERT INTO separadores (nome) VALUES (?)", (nome,))
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(text("INSERT INTO separadores (nome) VALUES (:n)"), {"n": nome})
 
 
 def remover_separador(nome):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute("DELETE FROM separadores WHERE nome = ?", (nome,))
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(text("DELETE FROM separadores WHERE nome = :n"), {"n": nome})
 
 
 # --- REGISTROS DE ERROS ---
@@ -195,608 +177,183 @@ def inserir_registro(
     qtd_divergente,
     observacao,
 ):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      """
-        INSERT INTO registros (data_hora, num_pedido, conferente_user, conferente_nome, separador, tipo_erro, sku_produto, qtd_divergente, observacao, status_edicao)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Aprovado')
-    """,
-      (
-          datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-          num_pedido,
-          conferente_user,
-          conferente_nome,
-          separador,
-          tipo_erro,
-          sku_produto,
-          qtd_divergente,
-          observacao,
-      ),
-  )
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(
+        text("""
+            INSERT INTO registros (data_hora, num_pedido, conferente_user, conferente_nome, separador, tipo_erro, sku_produto, qtd_divergente, observacao, status_edicao)
+            VALUES (:dh, :np, :cu, :cn, :sep, :te, :sku, :qtd, :obs, 'Aprovado')
+        """),
+        {
+            "dh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "np": num_pedido,
+            "cu": conferente_user,
+            "cn": conferente_nome,
+            "sep": separador,
+            "te": tipo_erro,
+            "sku": sku_produto,
+            "qtd": qtd_divergente,
+            "obs": observacao,
+        }
+    )
 
 
 def carregar_todos_registros():
-  conn = get_conn()
-  df = pd.read_sql_query("SELECT * FROM registros ORDER BY id DESC", conn)
-  conn.close()
+  engine = get_engine()
+  df = pd.read_sql("SELECT * FROM registros ORDER BY id DESC", engine)
   return df
 
 
 def carregar_registros_por_conferente(username):
-  conn = get_conn()
-  df = pd.read_sql_query(
-      "SELECT * FROM registros WHERE conferente_user = ? ORDER BY id DESC",
-      conn,
-      params=(username,),
+  engine = get_engine()
+  df = pd.read_sql(
+      text("SELECT * FROM registros WHERE conferente_user = :u ORDER BY id DESC"),
+      engine,
+      params={"u": username}
   )
-  conn.close()
   return df
 
 
 def solicitar_edicao_registro(id_reg, dados_dict):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      "UPDATE registros SET status_edicao = 'Pendente', dados_pendentes = ? WHERE id = ?",
-      (json.dumps(dados_dict), int(id_reg)),
-  )
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(
+        text("UPDATE registros SET status_edicao = 'Pendente', dados_pendentes = :dp WHERE id = :id"),
+        {"dp": json.dumps(dados_dict), "id": int(id_reg)}
+    )
 
 
 def aprovar_edicao(id_reg, novos):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      """
-        UPDATE registros SET 
-            num_pedido = ?, separador = ?, tipo_erro = ?, sku_produto = ?, 
-            qtd_divergente = ?, observacao = ?, status_edicao = 'Aprovado', dados_pendentes = NULL
-        WHERE id = ?
-    """,
-      (
-          novos["num_pedido"],
-          novos["separador"],
-          novos["tipo_erro"],
-          novos["sku_produto"],
-          novos["qtd_divergente"],
-          novos["observacao"],
-          id_reg,
-      ),
-  )
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(
+        text("""
+            UPDATE registros SET 
+                num_pedido = :np, separador = :sep, tipo_erro = :te, sku_produto = :sku, 
+                qtd_divergente = :qtd, observacao = :obs, status_edicao = 'Aprovado', dados_pendentes = NULL
+            WHERE id = :id
+        """),
+        {
+            "np": novos["num_pedido"],
+            "sep": novos["separador"],
+            "te": novos["tipo_erro"],
+            "sku": novos["sku_produto"],
+            "qtd": novos["qtd_divergente"],
+            "obs": novos["observacao"],
+            "id": id_reg,
+        }
+    )
 
 
 def rejeitar_edicao(id_reg):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      "UPDATE registros SET status_edicao = 'Rejeitado', dados_pendentes = NULL WHERE id = ?",
-      (id_reg,),
-  )
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(
+        text("UPDATE registros SET status_edicao = 'Rejeitado', dados_pendentes = NULL WHERE id = :id"),
+        {"id": id_reg}
+    )
 
 
 def excluir_registro(id_reg):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute("DELETE FROM registros WHERE id = ?", (id_reg,))
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(text("DELETE FROM registros WHERE id = :id"), {"id": id_reg})
 
 
 def excluir_multiplos_registros(ids_lista):
   if not ids_lista:
     return
-  conn = get_conn()
-  c = conn.cursor()
-  placeholders = ",".join(["?"] * len(ids_lista))
-  c.execute(f"DELETE FROM registros WHERE id IN ({placeholders})", ids_lista)
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(
+        text("DELETE FROM registros WHERE id = ANY(:ids)"),
+        {"ids": ids_lista}
+    )
 
 
 def zerar_registros_e_ids():
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute("DELETE FROM registros")
-  c.execute("DELETE FROM sqlite_sequence WHERE name='registros'")
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(text("DELETE FROM registros"))
+    try:
+      conn.execute(text("ALTER SEQUENCE registros_id_seq RESTART WITH 1"))
+    except Exception:
+      pass
 
 
 # --- SOLICITAÇÃO DE EXCLUSÃO PELO GESTOR ---
 def solicitar_exclusao_registros(ids_lista, username, nome):
-  conn = get_conn()
-  c = conn.cursor()
-  dados_json = json.dumps(ids_lista)
-  c.execute(
-      """
-        INSERT INTO registros (data_hora, num_pedido, conferente_user, conferente_nome, separador, tipo_erro, sku_produto, qtd_divergente, observacao, status_edicao, dados_pendentes)
-        VALUES (?, 'EXCLUSAO_EM_MASSA', ?, ?, 'SISTEMA', 'EXCLUSAO', 'S/N', 0, ?, 'Pendente_Exclusao', ?)
-    """,
-      (
-          datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-          username,
-          nome,
-          f"Solicitação de exclusão de {len(ids_lista)} registro(s).",
-          dados_json,
-      ),
-  )
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(
+        text("""
+            INSERT INTO registros (data_hora, num_pedido, conferente_user, conferente_nome, separador, tipo_erro, sku_produto, qtd_divergente, observacao, status_edicao, dados_pendentes)
+            VALUES (:dh, 'EXCLUSAO_EM_MASSA', :cu, :cn, 'SISTEMA', 'EXCLUSAO', 'S/N', 0, :obs, 'Pendente_Exclusao', :dp)
+        """),
+        {
+            "dh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "cu": username,
+            "cn": nome,
+            "obs": f"Solicitação de exclusão de {len(ids_lista)} registro(s).",
+            "dp": json.dumps(ids_lista),
+        }
+    )
 
 
 # --- AUDITORIA ---
 def registrar_auditoria(username, nome, acao, detalhes):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      """
-        INSERT INTO auditoria (data_hora, usuario, nome, acao, detalhes)
-        VALUES (?, ?, ?, ?, ?)
-    """,
-      (
-          datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-          username,
-          nome,
-          acao,
-          detalhes,
-      ),
-  )
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(
+        text("""
+            INSERT INTO auditoria (data_hora, usuario, nome, acao, detalhes)
+            VALUES (:dh, :u, :n, :ac, :det)
+        """),
+        {
+            "dh": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "u": username,
+            "n": nome,
+            "ac": acao,
+            "det": detalhes,
+        }
+    )
 
 
 def carregar_auditoria():
-  conn = get_conn()
-  df = pd.read_sql_query("SELECT * FROM auditoria ORDER BY id DESC", conn)
-  conn.close()
+  engine = get_engine()
+  df = pd.read_sql("SELECT * FROM auditoria ORDER BY id DESC", engine)
   return df
 
 
 # --- GESTÃO DE USUÁRIOS ---
 def criar_usuario(username, nome, role="conferente"):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      "INSERT INTO usuarios VALUES (?, ?, ?, ?)",
-      (username.strip().lower(), nome, hash_senha("123456"), role),
-  )
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(
+        text("INSERT INTO usuarios VALUES (:u, :n, :s, :r)"),
+        {"u": username.strip().lower(), "n": nome, "s": hash_senha("123456"), "r": role}
+    )
 
 
 def listar_usuarios():
-  conn = get_conn()
-  df = pd.read_sql_query(
+  engine = get_engine()
+  df = pd.read_sql(
       "SELECT username, nome, role FROM usuarios WHERE username != 'admin'",
-      conn,
+      engine,
   )
-  conn.close()
   return df
 
 
 def resetar_senha_usuario(username):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      "UPDATE usuarios SET senha_hash = ? WHERE username = ?",
-      (hash_senha("123456"), username),
-  )
-  conn.commit()
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(
+        text("UPDATE usuarios SET senha_hash = :s WHERE username = :u"),
+        {"s": hash_senha("123456"), "u": username}
+    )
 
 
 def excluir_usuario(username):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute("DELETE FROM usuarios WHERE username = ?", (username,))
-  conn.commit()
-=======
-from datetime import datetime
-import hashlib
-import json
-import sqlite3
-import pandas as pd
-
-DB_NAME = "erros_separacao_v2.db"
-
-
-def hash_senha(senha):
-  return hashlib.sha256(senha.encode()).hexdigest()
-
-
-def get_conn():
-  return sqlite3.connect(DB_NAME, check_same_thread=False)
-
-
-def init_db():
-  conn = get_conn()
-  c = conn.cursor()
-
-  # Tabela de Usuários
-  c.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            username TEXT PRIMARY KEY,
-            nome TEXT NOT NULL,
-            senha_hash TEXT NOT NULL,
-            role TEXT NOT NULL
-        )
-    """)
-
-  # Tabela de Separadores
-  c.execute("""
-        CREATE TABLE IF NOT EXISTS separadores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT UNIQUE NOT NULL
-        )
-    """)
-
-  # Tabela de Registros de Erros
-  c.execute("""
-        CREATE TABLE IF NOT EXISTS registros (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            data_hora TEXT,
-            num_pedido TEXT,
-            conferente_user TEXT,
-            conferente_nome TEXT,
-            separador TEXT,
-            tipo_erro TEXT,
-            sku_produto TEXT,
-            qtd_divergente INTEGER,
-            observacao TEXT,
-            status_edicao TEXT DEFAULT 'Aprovado',
-            dados_pendentes TEXT
-        )
-    """)
-
-  # Tabela de Auditoria / Histórico de Ações
-  c.execute("""
-        CREATE TABLE IF NOT EXISTS auditoria (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            data_hora TEXT,
-            usuario TEXT,
-            nome TEXT,
-            acao TEXT,
-            detalhes TEXT
-        )
-    """)
-
-  # Criar Admin padrão se não existir
-  c.execute("SELECT * FROM usuarios WHERE username = 'admin'")
-  if not c.fetchone():
-    c.execute(
-        "INSERT INTO usuarios VALUES (?, ?, ?, ?)",
-        ("admin", "Administrador", hash_senha("admin123"), "admin"),
-    )
-
-  # Criar separadores iniciais se estiver vazio
-  c.execute("SELECT COUNT(*) FROM separadores")
-  if c.fetchone()[0] == 0:
-    iniciais = [
-        ("João Silva",),
-        ("Pedro Santos",),
-        ("Lucas Oliveira",),
-        ("Fernanda Alves",),
-    ]
-    c.executemany("INSERT INTO separadores (nome) VALUES (?)", iniciais)
-
-  conn.commit()
-  conn.close()
-
-
-# --- AUTENTICAÇÃO E PERFIL ---
-def autenticar_usuario(username, senha):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      "SELECT nome, role FROM usuarios WHERE username = ? AND senha_hash = ?",
-      (username, hash_senha(senha)),
-  )
-  user = c.fetchone()
-  conn.close()
-  return user  # Retorna (nome, role) ou None
-
-
-def alterar_senha(username, senha_atual, nova_senha):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      "SELECT * FROM usuarios WHERE username = ? AND senha_hash = ?",
-      (username, hash_senha(senha_atual)),
-  )
-  if c.fetchone():
-    c.execute(
-        "UPDATE usuarios SET senha_hash = ? WHERE username = ?",
-        (hash_senha(nova_senha), username),
-    )
-    conn.commit()
-    conn.close()
-    return True
-  conn.close()
-  return False
-
-
-def atualizar_dados_usuario(username_atual, novo_username, novo_nome):
-  conn = get_conn()
-  c = conn.cursor()
-  novo_username = novo_username.strip().lower()
-
-  if novo_username != username_atual:
-    c.execute("SELECT * FROM usuarios WHERE username = ?", (novo_username,))
-    if c.fetchone():
-      conn.close()
-      return (
-          False,
-          "Este login (usuário) já está em uso por outra conta.",
-      )
-
-    c.execute(
-        "UPDATE usuarios SET username = ?, nome = ? WHERE username = ?",
-        (novo_username, novo_nome, username_atual),
-    )
-    c.execute(
-        "UPDATE registros SET conferente_user = ?, conferente_nome = ? WHERE conferente_user = ?",
-        (novo_username, novo_nome, username_atual),
-    )
-  else:
-    c.execute(
-        "UPDATE usuarios SET nome = ? WHERE username = ?",
-        (novo_nome, username_atual),
-    )
-    c.execute(
-        "UPDATE registros SET conferente_nome = ? WHERE conferente_user = ?",
-        (novo_nome, username_atual),
-    )
-
-  conn.commit()
-  conn.close()
-  return True, "Dados atualizados com sucesso!"
-
-
-# --- SEPARADORES ---
-def get_separadores():
-  conn = get_conn()
-  df = pd.read_sql_query("SELECT nome FROM separadores ORDER BY nome", conn)
-  conn.close()
-  return df["nome"].tolist()
-
-
-def adicionar_separador(nome):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute("INSERT INTO separadores (nome) VALUES (?)", (nome,))
-  conn.commit()
-  conn.close()
-
-
-def remover_separador(nome):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute("DELETE FROM separadores WHERE nome = ?", (nome,))
-  conn.commit()
-  conn.close()
-
-
-# --- REGISTROS DE ERROS ---
-def inserir_registro(
-    num_pedido,
-    conferente_user,
-    conferente_nome,
-    separador,
-    tipo_erro,
-    sku_produto,
-    qtd_divergente,
-    observacao,
-):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      """
-        INSERT INTO registros (data_hora, num_pedido, conferente_user, conferente_nome, separador, tipo_erro, sku_produto, qtd_divergente, observacao, status_edicao)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Aprovado')
-    """,
-      (
-          datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-          num_pedido,
-          conferente_user,
-          conferente_nome,
-          separador,
-          tipo_erro,
-          sku_produto,
-          qtd_divergente,
-          observacao,
-      ),
-  )
-  conn.commit()
-  conn.close()
-
-
-def carregar_todos_registros():
-  conn = get_conn()
-  df = pd.read_sql_query("SELECT * FROM registros ORDER BY id DESC", conn)
-  conn.close()
-  return df
-
-
-def carregar_registros_por_conferente(username):
-  conn = get_conn()
-  df = pd.read_sql_query(
-      "SELECT * FROM registros WHERE conferente_user = ? ORDER BY id DESC",
-      conn,
-      params=(username,),
-  )
-  conn.close()
-  return df
-
-
-def solicitar_edicao_registro(id_reg, dados_dict):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      "UPDATE registros SET status_edicao = 'Pendente', dados_pendentes = ? WHERE id = ?",
-      (json.dumps(dados_dict), int(id_reg)),
-  )
-  conn.commit()
-  conn.close()
-
-
-def aprovar_edicao(id_reg, novos):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      """
-        UPDATE registros SET 
-            num_pedido = ?, separador = ?, tipo_erro = ?, sku_produto = ?, 
-            qtd_divergente = ?, observacao = ?, status_edicao = 'Aprovado', dados_pendentes = NULL
-        WHERE id = ?
-    """,
-      (
-          novos["num_pedido"],
-          novos["separador"],
-          novos["tipo_erro"],
-          novos["sku_produto"],
-          novos["qtd_divergente"],
-          novos["observacao"],
-          id_reg,
-      ),
-  )
-  conn.commit()
-  conn.close()
-
-
-def rejeitar_edicao(id_reg):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      "UPDATE registros SET status_edicao = 'Rejeitado', dados_pendentes = NULL WHERE id = ?",
-      (id_reg,),
-  )
-  conn.commit()
-  conn.close()
-
-
-def excluir_registro(id_reg):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute("DELETE FROM registros WHERE id = ?", (id_reg,))
-  conn.commit()
-  conn.close()
-
-
-def excluir_multiplos_registros(ids_lista):
-  if not ids_lista:
-    return
-  conn = get_conn()
-  c = conn.cursor()
-  placeholders = ",".join(["?"] * len(ids_lista))
-  c.execute(f"DELETE FROM registros WHERE id IN ({placeholders})", ids_lista)
-  conn.commit()
-  conn.close()
-
-
-def zerar_registros_e_ids():
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute("DELETE FROM registros")
-  c.execute("DELETE FROM sqlite_sequence WHERE name='registros'")
-  conn.commit()
-  conn.close()
-
-
-# --- SOLICITAÇÃO DE EXCLUSÃO PELO GESTOR ---
-def solicitar_exclusao_registros(ids_lista, username, nome):
-  conn = get_conn()
-  c = conn.cursor()
-  dados_json = json.dumps(ids_lista)
-  c.execute(
-      """
-        INSERT INTO registros (data_hora, num_pedido, conferente_user, conferente_nome, separador, tipo_erro, sku_produto, qtd_divergente, observacao, status_edicao, dados_pendentes)
-        VALUES (?, 'EXCLUSAO_EM_MASSA', ?, ?, 'SISTEMA', 'EXCLUSAO', 'S/N', 0, ?, 'Pendente_Exclusao', ?)
-    """,
-      (
-          datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-          username,
-          nome,
-          f"Solicitação de exclusão de {len(ids_lista)} registro(s).",
-          dados_json,
-      ),
-  )
-  conn.commit()
-  conn.close()
-
-
-# --- AUDITORIA ---
-def registrar_auditoria(username, nome, acao, detalhes):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      """
-        INSERT INTO auditoria (data_hora, usuario, nome, acao, detalhes)
-        VALUES (?, ?, ?, ?, ?)
-    """,
-      (
-          datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-          username,
-          nome,
-          acao,
-          detalhes,
-      ),
-  )
-  conn.commit()
-  conn.close()
-
-
-def carregar_auditoria():
-  conn = get_conn()
-  df = pd.read_sql_query("SELECT * FROM auditoria ORDER BY id DESC", conn)
-  conn.close()
-  return df
-
-
-# --- GESTÃO DE USUÁRIOS ---
-def criar_usuario(username, nome, role="conferente"):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      "INSERT INTO usuarios VALUES (?, ?, ?, ?)",
-      (username.strip().lower(), nome, hash_senha("123456"), role),
-  )
-  conn.commit()
-  conn.close()
-
-
-def listar_usuarios():
-  conn = get_conn()
-  df = pd.read_sql_query(
-      "SELECT username, nome, role FROM usuarios WHERE username != 'admin'",
-      conn,
-  )
-  conn.close()
-  return df
-
-
-def resetar_senha_usuario(username):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute(
-      "UPDATE usuarios SET senha_hash = ? WHERE username = ?",
-      (hash_senha("123456"), username),
-  )
-  conn.commit()
-  conn.close()
-
-
-def excluir_usuario(username):
-  conn = get_conn()
-  c = conn.cursor()
-  c.execute("DELETE FROM usuarios WHERE username = ?", (username,))
-  conn.commit()
->>>>>>> bbf80b1 (Primeiro commit do projeto logístico)
-  conn.close()
+  engine = get_engine()
+  with engine.begin() as conn:
+    conn.execute(text("DELETE FROM usuarios WHERE username = :u"), {"u": username})
