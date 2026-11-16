@@ -5,10 +5,6 @@ import pandas as pd
 import streamlit as st
 from sqlalchemy import create_engine, text
 
-@st.cache_data(ttl=60) # Guarda em cache durante 60 segundos
-def carregar_todos_registros():
-    engine = get_engine()
-    
 def get_engine():
   # Tenta obter a DATABASE_URL das secrets de forma segura
   try:
@@ -40,7 +36,7 @@ def init_db():
     """))
 
     # 2. Inserção segura do admin padrão (evita UniqueViolation se já existir)
-    senha_padrao_hash = hash_senha("123456")  # ou a senha que preferir
+    senha_padrao_hash = hash_senha("123456")
     conn.execute(
         text("""
         INSERT INTO usuarios (username, nome, senha_hash, role)
@@ -49,8 +45,6 @@ def init_db():
     """),
         {"senha_hash": senha_padrao_hash},
     )
-
-    # (Mantenha aqui as criações das outras tabelas do seu banco.py, como registros, separadores, etc.)
 
     # Tabela de Separadores
     conn.execute(text("""
@@ -223,6 +217,7 @@ def inserir_registro(
     )
 
 
+@st.cache_data(ttl=60)
 def carregar_todos_registros():
   engine = get_engine()
   df = pd.read_sql("SELECT * FROM registros ORDER BY id DESC", engine)
