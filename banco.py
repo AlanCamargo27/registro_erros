@@ -46,6 +46,8 @@ def init_db():
         {"senha_hash": senha_padrao_hash},
     )
 
+    # (Mantenha aqui as criações das outras tabelas do seu banco.py, como registros, separadores, etc.)
+
     # Tabela de Separadores
     conn.execute(text("""
         CREATE TABLE IF NOT EXISTS separadores (
