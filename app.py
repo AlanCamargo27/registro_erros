@@ -859,6 +859,7 @@ def tela_historico():
 # ==============================================================================
 # ROTEAMENTO PRINCIPAL
 # ==============================================================================
+
 container_principal = st.container()
 
 with container_principal:
@@ -879,5 +880,5 @@ with container_principal:
       tela_admin_registros()
     elif menu == "👥 Usuários e Cadastros":
       tela_admin_usuarios()
-    elif menu == "📜 Histórico do Sistema" and st.session_state.role == "admin":
+    elif menu == "Histórico do Sistema" and st.session_state.role == "admin":
       tela_historico()
